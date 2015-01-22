@@ -120,7 +120,7 @@ my $help_flag;
 my $advanced_help_flag;
 my $SHOW_CITATION_FLAG = 0;
 
-my $VERSION = "BLEEDING_EDGE"; 
+my $VERSION = "trinity_r20150121"; 
 my $show_version_flag = 0;
 
 ## Kmer methods
