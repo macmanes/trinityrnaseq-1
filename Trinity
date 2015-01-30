@@ -29,6 +29,24 @@ use HTC::GridRunner;
 
 open (STDERR, ">&STDOUT");  ## capturing stderr and stdout in a single stdout stream
 
+#definitions
+
+my $ROOTDIR = "$FindBin::RealBin";
+my $UTILDIR = "$ROOTDIR/util";
+my $MISCDIR = "$UTILDIR/misc";
+my $INCHWORM_DIR = "$ROOTDIR/Inchworm/bin/";
+my $CHRYSALIS_DIR = "$ROOTDIR/Chrysalis";
+my $BUTTERFLY_DIR = "$ROOTDIR/Butterfly";
+my $JELLYFISH_DIR = "$ROOTDIR/trinity-plugins/jellyfish";
+my $FASTOOL_DIR = "$ROOTDIR/trinity-plugins/fastool";
+my $COLLECTL_DIR = "$ROOTDIR/trinity-plugins/collectl/bin";
+my $COREUTILS_DIR = "$ROOTDIR/trinity-plugins/coreutils/bin";
+my $PARAFLY = "$ROOTDIR/trinity-plugins/parafly/bin/ParaFly";
+my $TRIMMOMATIC = "$ROOTDIR/trinity-plugins/Trimmomatic/trimmomatic.jar";
+my $TRIMMOMATIC_DIR = "$ROOTDIR/trinity-plugins/Trimmomatic";
+#&version_check();
+
+
 # Site specific setup
 
 my $KMER_SIZE = 25;
@@ -120,7 +138,7 @@ my $help_flag;
 my $advanced_help_flag;
 my $SHOW_CITATION_FLAG = 0;
 
-my $VERSION = "Trinity_v2.0.2"; 
+my $VERSION = "Trinity_v2.0.0"; 
 my $show_version_flag = 0;
 
 ## Kmer methods
@@ -173,7 +191,7 @@ my $NO_PARALLEL_IWORM = 0;
 
 ## Quality trimming params
 my $RUN_TRIMMOMATIC_FLAG = 0;
-my $trimmomatic_quality_trim_params = "LEADING:5 TRAILING:5 MINLEN:36";
+my $trimmomatic_quality_trim_params = "ILLUMINACLIP:$TRIMMOMATIC_DIR/adapters/TruSeq3-PE.fa:2:30:10 SLIDINGWINDOW:4:5 LEADING:5 TRAILING:5 MINLEN:25 ";
 
 ## Normalize reads
 my $NORMALIZE_READS_FLAG = 0;
@@ -465,7 +483,8 @@ my $advanced_usage =  <<_ADVANCEDUSAGE_;
 #  Other:
 #  --monitoring                    :use collectl to monitor all steps of Trinity
 #  
-#  --bypass_java_version_check     : skip check for required java version 1.7
+#  --compdir|component_directory   : use a temporary or local directory for Components_bin
+#
 #
 
 
@@ -474,20 +493,6 @@ _ADVANCEDUSAGE_
  ;
 
 
-my $ROOTDIR = "$FindBin::RealBin";
-my $UTILDIR = "$ROOTDIR/util";
-my $MISCDIR = "$UTILDIR/misc";
-my $INCHWORM_DIR = "$ROOTDIR/Inchworm/bin/";
-my $CHRYSALIS_DIR = "$ROOTDIR/Chrysalis";
-my $BUTTERFLY_DIR = "$ROOTDIR/Butterfly";
-my $JELLYFISH_DIR = "$ROOTDIR/trinity-plugins/jellyfish";
-my $FASTOOL_DIR = "$ROOTDIR/trinity-plugins/fastool";
-my $COLLECTL_DIR = "$ROOTDIR/trinity-plugins/collectl/bin";
-my $COREUTILS_DIR = "$ROOTDIR/trinity-plugins/coreutils/bin";
-my $PARAFLY = "$ROOTDIR/trinity-plugins/parafly/bin/ParaFly";
-my $TRIMMOMATIC = "$ROOTDIR/trinity-plugins/Trimmomatic/trimmomatic.jar";
-
-#&version_check();
 
 my $usage = $basic_usage . $usage_synopsis;
 
@@ -538,7 +543,7 @@ my @ORIG_ARGS = @ARGV;
 my $CHRYSALIS_DEBUG_WELD_ALL = 0;
 my $iworm_opts = "";
 
-my $bypass_java_version_check = 0;
+
 
 &GetOptions( 
     
@@ -645,7 +650,7 @@ my $bypass_java_version_check = 0;
     # hidden (don't look here! ;) 
     'KMER_SIZE=i' => \$KMER_SIZE,
     'jelly_s=i' => \$JELLY_S,
-    
+    'compdir|component_directory=s'  => \$component_directory,
     'NO_PARALLEL_IWORM' => \$NO_PARALLEL_IWORM,
     'chrysalis_debug_weld_all' => \$CHRYSALIS_DEBUG_WELD_ALL,
              
@@ -663,7 +668,6 @@ my $bypass_java_version_check = 0;
     "grid_node_CPU=i" => \$grid_node_CPU,
     "grid_node_max_memory=s" => \$grid_node_max_memory,
     
-    "bypass_java_version_check" => \$bypass_java_version_check,
     
 
              );
@@ -756,12 +760,6 @@ if ($SS_lib_type) {
 unless ($genome_guided_bam ||  (@left_files && @right_files) || @single_files ) {
     die "Error, need either options 'left' and 'right' or option 'single' or 'genome_guided_bam'\n";
 }
-unless ($genome_guided_bam) {
-    unless ($seqType) {
-        die "Error, need --seqType specified\n";
-    }
-}
-
 
 if (@left_files) {
     @left_files = split(",", join(",", @left_files));
@@ -792,19 +790,13 @@ else {
 
 
 ## Check Java version:
-unless ($NO_RUN_INCHWORM_FLAG || $NO_RUN_CHRYSALIS_FLAG || $bypass_java_version_check) {
+unless ($NO_RUN_INCHWORM_FLAG || $NO_RUN_CHRYSALIS_FLAG) {
   my $java_version = `java -Xmx64m -version 2>&1 `;
-  if ($java_version =~ /(java|openjdk) version \"1\.(\d)\./) {
-      my $version_id = $2;
-      if ($version_id != 7) {
+  unless ($java_version =~ /(java|openjdk) version \"1\.(\d)\./) {
+      my $version_id = $1;
+      if ($version_id < 7) {
           die "Error, Trinity requires access to Java version 1.7.  Currently installed version is: $java_version";
       }
-  }
-  else {
-      print STDERR "\n\n\n********************************************************************\n"
-                       . "** Warning, Trinity cannot determine which version of Java is being used.  Version 1.7 is required. \n\nAttempting to continue in 30 seconds\n"
-                       . "********************************************************************\n\n\n";
-      sleep(30);
   }
 }
 
@@ -1535,7 +1527,7 @@ sub run_chrysalis {
     
     my $partitioning_checkpoint_file = "$chrysalis_output_dir/file_partitioning.ok";
 
-    my $cmd = "$UTILDIR/support_scripts/partition_chrysalis_graphs_n_reads.pl --deBruijns $chrysalis_output_dir/bundled_iworm_contigs.fasta.deBruijn --componentReads $chrysalis_output_dir/readsToComponents.out.sort -N 1000 -L $min_contig_length ";
+    my $cmd = "$UTILDIR/support_scripts/partition_chrysalis_graphs_n_reads.pl --deBruijns $chrysalis_output_dir/bundled_iworm_contigs.fasta.deBruijn --componentReads $chrysalis_output_dir/readsToComponents.out.sort -N 1000 -L $min_contig_length --compdir $component_directory ";
 
     &process_cmd($cmd) unless (-e $partitioning_checkpoint_file);
     
